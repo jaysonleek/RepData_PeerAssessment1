@@ -1,25 +1,516 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: "Project1"
+author: "Jayson Leek"
+date: "9/3/2020"
+output: html_document
 ---
 
+INTRODUCTION
 
-## Loading and preprocessing the data
+This assignment makes use of data from a personal activity monitoring device (like a FitBit or equivalent). This device collects data at 5 minute intervals throughout the day. The data consists of two months of observations from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5-minute intervals each day.
+
+The variables included in this dataset are:
+
+1. steps: The number of steps taken in a 5-minute interval (missing values are coded as NA)
+
+2. date: The date on which the measurement was taken in YYYY-MM-DD format
+
+3. interval: Identifier for the 5-minute interval in which the measurement was taken
+
+There are a total of 17,568 observations in this dataset. In this report I will simulate the process of exploring the data. I will generate some plots and explain my interpretation of the data. I will be sharing and explaining the code that I wrote to do the statistical analysis and generate the plots.
+
+LOADING AND PROCESSING THE DATA
+
+First, let's get our R environment ready. Please make sure that R is in an appropriate working directory (setwd("pathtoworkingdirectory")). This code chunk will load the necessary packages from the package library. It will download the data file and unzip it. Then it will read the file and assign it to raw_data.
+
+```{r echo = TRUE}
+
+# rm(list = ls())
+
+path <- getwd()
+
+packages <- c("dplyr", "ggplot2")
+
+# Runs library call on packages list
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+file_URL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+
+dest_file <- "./data/activity.zip" 
+
+data_file <- "./data/activity.csv"
+
+# These if commands check before acting
+if (!dir.exists("./data")) {
+        dir.create(paste(path, "data", sep = "/"))
+}
+
+if (!dir.exists("./figures")) {
+        dir.create(paste(path, "figures", sep = "/"))
+}
+
+if (!file.exists(dest_file)) {
+        download.file(file_URL, dest_file)
+}
+
+if (!file.exists(data_file)) {
+        unzip(dest_file, exdir = "./data")
+}
+
+raw_data <- read.csv(data_file)
+
+summary(raw_data$steps)
+
+```
+
+The summary call on the steps variable of the raw data shows that there are 2304 NA's out of 17,568 observations which is about 13%. There must be a lot of zero values as well since the median is 0. That makes sense if you think about it. There has to be times when the subject is unable to take steps because they are sitting or sleeping or taking a shower and not wearing the monitor. We will have to do more exploration as we go along to see if the NAs and zeroes are distributed at random or if we can make some sense of it. This will help us determine what we should do about the missing values.
+
+But first, we need to summarize our data to pull out more meaningful results. Let's try aggregating by date. The date variable is a character string now so we will convert it to a format R can recognize. Then we can group by date and summarize the daily total steps with the dplyr package and do a histogram of the daily total steps. I will add a vertical line to mark the mean. We will write this to plot1.png.
+
+```{r}
+
+raw_data$date <- as.Date(as.character(raw_data$date))
+
+raw_data_by_date <- raw_data %>% 
+        group_by(date) %>% 
+        summarize(raw_daily_total = sum(steps)) %>%
+        arrange(desc(raw_daily_total))
+
+par(mfrow = c(1, 1))
+
+with(raw_data_by_date, 
+        hist(raw_daily_total, 
+        breaks = 14, 
+        main = "Histogram of Steps Each Day (Raw Data)"))
+
+# Add a line where for the mean daily total
+
+abline(v = mean(raw_data_by_date$raw_daily_total, na.rm = TRUE))
+
+# Write to png
+
+dev.copy(png, file = "./figures/plot1.png")
+dev.off()
+
+```
+
+By far the most frequent daily total is clumped around the median and mean, which are very similar. The distribution is normal with long skinny tails stretching in both directions. Let's take a look at a summary of the daily totals.
+
+```{r}
+
+summary(raw_data_by_date$raw_daily_total)
+
+```
+
+Now we are getting somewhere. The daily total mean and median are statistically identical. There are now 8 NA's. This means that our NA's represent 8 complete days of data that are missing from the data set. The minimum value is 41 which seems really low. Less than 1/2 a percent of our mean/median. We should look at a boxplot to see what the distribution looks like. I would also like to get a general idea of which days are the missing/low/high days. We can plot steps against the date with vertical lines to see if we can glean some more information. This is not answering one of the questions for the assignment, just demonstrating my thought process, so I am not going to write these plots to png files or spend any time with annotations.
+
+```{r}
+
+par(mfrow = c(1, 2))
+plot(raw_data_by_date$date, raw_data_by_date$raw_daily_total, type = "h")
+
+boxplot(raw_data_by_date$raw_daily_total)
+
+```
 
 
 
-## What is mean total number of steps taken per day?
+
+WHAT IS THE TOTAL NUMBER OF STEPS TAKEN PER DAY?
+
+So it looks like we are missing October 1st and maybe the 9th, and then several days in the period between November 1 and November 16th. We have an outlier on October 2nd. That's our 41 step day. There also appears to be another very low day with only 126 steps on about November 15. The box and whisker plot also reveals we have two outliers on the high end. This appears to be the day of Thanksgiving and the day after. Our subject must have spent the Holiday weekend pounding the pavement. Or maybe just a lot of Black Friday shopping. 
+
+Let's go ahead and find the median and mean of the raw daily steps per day. And I would like to compare those to a dataset with the outliers isolated and removed. This will let us know if the outliers are having a big affect on the averages. I will drop the 2 highest and 2 lowest values. We will continue to ignore the missing days for now.
+
+```{r}
+
+trim_data_by_date <- 
+        raw_data_by_date[which(raw_data_by_date$raw_daily_total > 126 & 
+                               raw_data_by_date$raw_daily_total < 20000), ]
+
+raw_summary <- as.vector(summary(raw_data_by_date$raw_daily_total))
+
+trim_summary <- as.vector(summary(trim_data_by_date$raw_daily_total))
+
+trim_summary <- append(trim_summary, 0)
+                          
+summary_names <- c("Minimum", 
+                   "1st Q", 
+                   "Median", 
+                   "Mean", 
+                   "3rd Q", 
+                   "Maximum", 
+                   "NAs")
+
+raw_trim_summary <- 
+        cbind.data.frame("Summary" = summary_names, 
+                         "RawData" = raw_summary, 
+                         "TrimData" = trim_summary)
+
+raw_trim_summary
+
+```
+
+WHAT IS THE AVERAGE DAILY ACTIVITY PATTERN?
+
+We eliminated two values above the median and two values below so the median of the trimmed data is the same as the raw data. The mean creeped up just a little. So it seems that dropping the outliers doesn't have a huge affect on the overall daily averages because the highs and lows pretty much cancel each other out. 
+
+Let's see how the activity pattern changes throughout the day by calculating the mean steps taken in each interval for the entire observation period. We should also see which interval contains the maximum mean for the dataset.
+
+```{r}
+
+par(mfrow = c(1, 1))
+
+raw_data_by_interval <- raw_data %>% 
+        group_by(interval) %>% 
+        summarize(raw_interval_mean = mean(steps, na.rm = TRUE), 
+                  raw_interval_median = median(steps, na.rm = TRUE))
+
+max_mean_interval <- 
+    raw_data_by_interval[which.max(raw_data_by_interval$raw_interval_mean), ]
+max_mean_interval
+
+```
+
+I just noticed something interesting. The median interval for a lot of intervals is zero. The mean interval contains no zero numbers. Little decisions like whether to use the median or the mean will have a huge impact on our imputed data. For future exploration it might be interesting to see what the median and mean values would be at the half hour, hour, 4 hour, etc marks. Depending on what you are using the data for, different averaging and grouping strategies might make sense. For the purposes of this assignment, to avoid adding a bunch of zeroes to my dataset, I'm going to use the mean interval. It makes more sense when we will be aggregating to daily values. 
+
+```{r}
+
+daily_total_using_mean <- sum(raw_data_by_interval$raw_interval_mean)
+daily_total_using_median <- sum(raw_data_by_interval$raw_interval_median)
+
+boxplot(raw_data_by_interval$raw_interval_mean, raw_data_by_interval$raw_interval_median, names = c("Mean Interval", "Median Interval"))
+
+```
 
 
 
-## What is the average daily activity pattern?
 
 
 
-## Imputing missing values
+
+Here's the plot for the mean number of steps taken for each interval, averaged across the entirety of the dataset. Observations with missing values have been discarded. I placed a vertical line to mark our max mean interval.
+
+```{r}
+with(raw_data_by_interval, 
+        plot(interval, 
+                raw_interval_mean, 
+                type = "l",
+                main = "Time Series of Average Steps Taken per Interval"))
+with(raw_data_by_interval, 
+        abline(v = max_mean_interval[[1]]))
+
+dev.copy(png, file = "./figures/plot2.png")
+dev.off()
+
+```
+
+IMPUTING MISSING VALUES
+
+Our max mean interval, interval 835, corresponds to 8:35:00-8:39:59 AM. Our subject averaged over 200 steps a day during this five-minute interval over the observation period. The subject must walk to work or walk the dog or exercise etc during this period on a very regular basis. It would be interesting to see if this interval is busy 7 days a week or if there is variation between weekend days and weekday days. Perhaps we can explore this more in a bit.
+
+But first, let's think about our missing values. The presence of missing data may introduce bias into some calculations or summaries. We have many ways of dealing with missing values. We could limit our analysis to "complete cases" by just removing the observations with missing values. This is, in effect, what we have done so far by using the na.rm = TRUE argument for our mean and median calculations. We could set all of the missing values to zero. We could use the mean for each day and divide it by 288 and plug that value in to each missing interval. Or we could use the mean for each interval from the observed values. 
+
+All of these strategies will have some affect on the numbers, but we should be focused on a strategy that imparts the least amount of bias into our analysis. I have already shown how using the median interval would introduce a lot of zero's and skew the mean toward the left for instance. 
+
+We know from the analysis above that we are missing 8 complete days of observations. More than half of our observed daily total values are in the 10-12,000 range. So we could just use the daily median. But there is a lot of variance between daily totals so that would not be very precise.
+
+What I am going to do is add the mean values for each interval to the eight dates that are missing values. There are much more sophisticated methods for imputing numbers through regression, predictive mean matching, random forest algorithms, etc, but since we aren't really missing values at random, but instead entire day's worth of observations, this simple method would be more appropriate. We will double-check our imputed data to make sure that it makes sense. 
+
+I will go ahead and group the new dataset by date and run the histogram again. We will save this as plot3.png.
+
+```{r}
+
+# Make a vector that contains all of the dates that have NA for their step counts
+
+days_with_NAs <- 
+        raw_data_by_date[is.na(raw_data_by_date$raw_daily_total),][[1]]
+
+days_with_NAs
+
+# Create a dataframe with three columns (date, interval and steps), the date column is NA for now. 
+# This will be the imputed data for each day that is missing in our dataset.
+
+data_to_impute_A <- 
+  data.frame(steps = raw_data_by_interval$raw_interval_mean, 
+             date = NA, 
+             interval = raw_data_by_interval$interval)
+
+# Bind our daily median interval levels together 8 times for the 8 days worth of data we need to impute
+
+data_to_impute_B <- rbind(data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A, 
+                          data_to_impute_A)
+
+# Figure out where to cut the data to put in the NA dates
+
+cutpoints <- seq(1, (8 * nrow(data_to_impute_A)), by = nrow(data_to_impute_A))
+
+# Use subset notation to add the date values to appropriate observations
+
+data_to_impute_B$date[1:288] <- "2012-10-01"
+data_to_impute_B$date[289:576] <- "2012-10-08"
+data_to_impute_B$date[577:864] <- "2012-11-01"
+data_to_impute_B$date[865:1152] <- "2012-11-04"
+data_to_impute_B$date[1153:1440] <- "2012-11-09"
+data_to_impute_B$date[1441:1728] <- "2012-11-10"
+data_to_impute_B$date[1729:2016] <- "2012-11-14"
+data_to_impute_B$date[2017:2304] <- "2012-11-30"
+
+# Bind all of the valid observations from the original data set with our imputed values and arrange by date
+
+imputed_data <- rbind(raw_data[!is.na(raw_data$steps), ], data_to_impute_B)
+imputed_data <- imputed_data %>% arrange(date)
+
+# Group by date and summarize by daily total
+
+imputed_by_date <- imputed_data %>% 
+        group_by(date) %>% 
+        summarize(imputed_daily_total = sum(steps))
+
+# Plot and write a histogram with the complete data set
+
+par(mfrow = (c(1, 1)))
+
+with(imputed_by_date,
+        hist(imputed_daily_total,
+                breaks = 14,
+                main = "Histogram of Steps Each Day (Imputed Data)"))
+
+dev.copy(png, file = "./figures/plot3.png")
+dev.off()
+
+```
+
+It doesn't look very different from the plot of the raw data. Imputing the daily averages for each interval for each missing day doesn't change the median or the distribution much at all. Let's calculate the median and mean daily steps of the complete dataset. And the total steps in both data sets for comparison.
+
+```{r}
+
+Compared <- 
+        data.frame(RawData = 
+                   c(mean(raw_data_by_date$raw_daily_total,
+                            na.rm = TRUE),
+                     median(raw_data_by_date$raw_daily_total,
+                            na.rm = TRUE),
+                     sum(raw_data_by_date$raw_daily_total,
+                            na.rm = TRUE)),
+                   NAsImputed = 
+                    c(mean(imputed_by_date$imputed_daily_total),
+                      median(imputed_by_date$imputed_daily_total),
+                      sum(imputed_by_date$imputed_daily_total)))
+
+rownames(Compared) <- c("DailyTotalMean", "DailyTotalMedian", "GrandTotalSteps")
+
+Compared
+
+
+```
+
+As you can see, we are essentially adding 8 more days with average daily data. This means that the mean and the median stay where they are. The grand total of the imputed data set has gone up about 86,000. This makes sense because our daily average is about 10,800 and we added 8 more days worth of data. Our assumption is that on the missing days, the subject did about the same patterns of activities across the day as they would have if they did their average amount of activity for every interval. Let's compare the complete data set with the raw data set with a side by side of the vertical line time series plot to see the difference.
+
+```{r}
+
+par(mfrow = c(1, 2))
+
+with(raw_data_by_date, 
+     plot(date, 
+          raw_daily_total, 
+          type = "h", 
+          main = "Raw Daily Totals"))
+
+with(imputed_by_date, 
+     plot(date, 
+          imputed_daily_total, 
+          type = "h", 
+          main = "Imputed Daily Totals"))
+
+
+```
+
+ARE THERE DIFFERENCES IN ACTIVITY PATTERNS BETWEEN WEEKDAYS AND WEEKENDS?
+
+The next pattern that we would like to explore is differences in activity between weekdays and weekend days. For this we will use our imputed dataset. This next code chunk extracts the day of the week from the date of each observation and assigns it to the new variable dayofweek. Then I assign "weekday" to another new variable called weekday. Then, I change any observations on Saturday or Sunday to "weekend". Next we will make our weekday variable a factor with two levels and group and summarize by interval and our new weekday factor. I will use the ggplot2 package to compare the average weekday to the average weekend day.
+
+
+```{r}
+
+imputed_data$dayofweek <- weekdays(imputed_data$date)
+
+imputed_data$weekday <- "weekday"
+
+imputed_data$weekday[with(imputed_data, 
+        which(dayofweek == "Saturday" | dayofweek == "Sunday"))] <- "weekend"
+
+imputed_data$dayofweek <- as.factor(imputed_data$dayofweek)
+imputed_data$weekday <- as.factor(imputed_data$weekday)
+imputed_data$interval <- as.factor(imputed_data$interval)
+
+imputed_by_interval <- imputed_data %>% 
+        group_by(interval, weekday) %>% 
+        summarize(imputed_interval_mean = mean(steps))
+
+ggplot(imputed_by_interval, aes(interval, imputed_interval_mean, group = 1)) +
+  geom_line() +
+  facet_grid(~ weekday) +
+  ggtitle("Mean Daily Steps per Interval - Weekday vs. Weekend") +
+  scale_x_discrete(breaks = c(0, 400, 800, 1200, 1600, 2000)) +
+  theme_bw()
+  
+dev.copy(png, file = "./figures/plot4.png")
+dev.off()
+
+```
+
+By comparing these two plots we can identify several differences in the average weekday compared to the average weekend day. Weekdays have a much greater range of variance throughout the day. There is a massive peak around 830 in the morning. Work starts and activity plummets. There is a blip for lunch then very little activity again. And then there is more activity in the evening before dropping off for bed time. The weekend does not have any peaks as big as the 8:35 peak on weekdays. But there is a simlar spike around the same time. Activity, in general, is higher throughout the day. Most of the non-sleeping time is spent above 50 steps per interval. The weekend starts and ends later than the weekdays as well.
+
+Just for fun I'm going to redo the imputation and calculate a different mean interval time for each day of the week.
+
+I'll throw in one more plot that breaks everything down by day of the week with the new imputation strategy.
+
+```{r}
+
+raw_data$dayofweek <- as.factor(weekdays(raw_data$date))
+
+imputed2 <- raw_data
+
+# Split the data into 7 dataframes, one for each day of the week
+
+imputed2A <- split(imputed2, imputed2$dayofweek)
+
+Sunday <- as.data.frame(imputed2A$Sunday)
+Monday <- as.data.frame(imputed2A$Monday)
+Tuesday <- as.data.frame(imputed2A$Tuesday)
+Wednesday <- as.data.frame(imputed2A$Wednesday)
+Thursday <- as.data.frame(imputed2A$Thursday)
+Friday <- as.data.frame(imputed2A$Friday)
+Saturday <- as.data.frame(imputed2A$Saturday)
+
+# Aggregate by interval and calculate a mean interval average for each day of the week
+
+imputedSunday <- Sunday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedMonday <- Monday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedTuesday <- Tuesday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedWednesday <- Wednesday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedThursday <- Thursday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedFriday <- Friday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+imputedSaturday <- Saturday %>% 
+  group_by(interval) %>% 
+  summarize(steps = mean(steps, na.rm = TRUE))
+
+# Bind together the days that are missing from the dataset
+
+NAdays <- data.frame(date = days_with_NAs, weekday = weekdays(days_with_NAs))
+NAdays
+
+imputed2B <- rbind(imputedMonday, 
+                   imputedMonday, 
+                   imputedThursday, 
+                   imputedSunday, 
+                   imputedFriday, 
+                   imputedSaturday, 
+                   imputedWednesday, 
+                   imputedFriday)
+
+# Add a date column and add the correct dates using subsetting
+
+cutpoints
+imputed2B$date <- "2012-10-01"
+imputed2B$date[289:576] <- "2012-10-08"
+imputed2B$date[577:864] <- "2012-11-01"
+imputed2B$date[865:1152] <- "2012-11-04"
+imputed2B$date[1153:1440] <- "2012-11-09"
+imputed2B$date[1441:1728] <- "2012-11-10"
+imputed2B$date[1729:2016] <- "2012-11-14"
+imputed2B$date[2017:2304] <- "2012-11-30"
+
+imputed2B$date <- as.Date(imputed2B$date)
+
+imputed2B$dayofweek <- weekdays(imputed2B$date)
+
+imputed2B <- imputed2B %>% 
+        select(steps, date, interval, dayofweek)
+
+imputed2C <- rbind(imputed2[!is.na(imputed2$steps), ], imputed2B)
+
+imputed_by_day_of_week <- imputed2C %>% 
+        group_by(interval, dayofweek) %>% 
+        summarize(imputed_interval_mean = mean(steps))
+
+par(mfrow = c(1, 1))
+
+imputed_by_day_of_week$dayofweek <- 
+        factor(imputed_by_day_of_week$dayofweek, 
+               c("Monday", 
+                 "Tuesday", 
+                 "Wednesday", 
+                 "Thursday", 
+                 "Friday", 
+                 "Saturday", 
+                 "Sunday"))
+
+ggplot(imputed_by_day_of_week, 
+        aes(interval, 
+            imputed_interval_mean, 
+            group = 1)) +
+        geom_line() +
+        facet_grid(~ dayofweek) +
+        geom_smooth(method = "loess", 
+                    se = FALSE, 
+                    span = 0.5, lwd = 2) +
+        ggtitle("Average Daily Steps per Interval - By Day of the Week") +
+        scale_x_discrete(breaks = c(400, 800, 1200, 1600, 2000)) +
+        theme_bw()
+  
+```
 
 
 
-## Are there differences in activity patterns between weekdays and weekends?
+
+
+
+
+
+Here's one last comparison between the daily total values generated by each imputation model. You can see how the second model is more precise because it takes into account which day of the week is missing.
+
+
+
+```{r}
+
+final_summaryA <- data.frame(Date = data_to_impute_B$date, Model_1 = data_to_impute_B$steps, Model_2 = imputed2B$steps)
+
+final_summaryB <- final_summaryA %>% 
+        group_by(Date) %>% 
+        summarize(Model_1 = sum(Model_1), Model_2 = sum(Model_2))
+
+final_summaryB$DayOfWeek <- weekdays(as.Date(final_summaryB$Date))
+
+final_summaryB
+
+```
+
+
+Thanks for looking.
